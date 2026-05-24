@@ -69,6 +69,29 @@
     font-size:20px;padding:0;width:40px;height:40px;line-height:1;
     display:flex;align-items:center;justify-content:center;align-self:stretch;}
   #soundBtn.off{opacity:.45;}
+  /* ranking ui */
+  #regBox{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px;}
+  #nickInput{background:var(--tile);border:2px solid #3a4256;
+    border-radius:12px;color:var(--ink);
+    font-size:16px;padding:11px 14px;text-align:center;outline:none;
+    font-family:inherit;}
+  #nickInput:focus{border-color:var(--accent);}
+  #regMsg{font-size:12px;color:var(--sub);min-height:16px;}
+  #regMsg.ok{color:var(--c2);} #regMsg.err{color:#ff8a8a;}
+  #regBox.done #nickInput,#regBox.done #submitBtn{display:none;}
+  #rankList{width:100%;max-width:300px;max-height:46vh;overflow-y:auto;
+    display:flex;flex-direction:column;gap:4px;}
+  .rk-row{display:flex;align-items:center;gap:8px;background:var(--panel);
+    border-radius:10px;padding:7px 11px;font-size:14px;}
+  .rk-rank{width:34px;font-weight:800;text-align:center;flex:none;}
+  .rk-name{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;}
+  .rk-score{font-weight:800;font-variant-numeric:tabular-nums;flex:none;}
+  .rk-row.g1{background:linear-gradient(90deg,#7a5c00,#b8860b);color:#fff;}
+  .rk-row.g2{background:linear-gradient(90deg,#5a5a5a,#9aa0a8);color:#fff;}
+  .rk-row.g3{background:linear-gradient(90deg,#6b3a14,#a8682f);color:#fff;}
+  .rk-row.me{box-shadow:0 0 0 2px var(--accent);}
+  #myRank{font-size:13px;color:var(--accent);min-height:18px;font-weight:700;}
 </style>
 </head>
 <body>
@@ -100,7 +123,21 @@
         <h2>タイムアップ</h2>
         <div class="big" id="finalScore">0</div>
         <p id="endMsg"></p>
+        <div id="regBox">
+          <input id="nickInput" type="text" maxlength="8"
+                 placeholder="ニックネーム（8文字まで）" autocomplete="off">
+          <button id="submitBtn">ランキングに登録</button>
+          <div id="regMsg"></div>
+        </div>
+        <button id="rankBtn" class="ghost">🏆 ランキングを見る</button>
         <button id="retryBtn">もう一度</button>
+      </div>
+      <div class="overlay" id="rankScreen" style="display:none">
+        <h2>🏆 ランキング</h2>
+        <div id="rankList"><p>読み込み中…</p></div>
+        <div id="myRank"></div>
+        <button id="rankRetryBtn">もう一度あそぶ</button>
+        <button id="rankBackBtn" class="ghost">結果画面に戻る</button>
       </div>
     </div>
   </div>
@@ -109,6 +146,53 @@
 <script>
 (function(){
   "use strict";
+
+  // ===== ranking backend (Supabase) =====
+  const SB_URL='https://mjipuzmqrjlyfgxowtie.supabase.co';
+  const SB_KEY='sb_publishable_dEtlgQmiYpD3chFHMwgftg_m-vRnxV6';
+  const Rank={
+    // fetch top 20 scores, highest first
+    async top(){
+      const url=SB_URL+'/rest/v1/scores?select=nickname,score'+
+        '&order=score.desc&limit=20';
+      const res=await fetch(url,{headers:{
+        apikey:SB_KEY, Authorization:'Bearer '+SB_KEY }});
+      if(!res.ok) throw new Error('fetch failed '+res.status);
+      return res.json();
+    },
+    // submit a score: keep only the player's personal best (1 row per name)
+    async submit(nickname,score){
+      // look up existing record for this nickname
+      const q=SB_URL+'/rest/v1/scores?select=id,score&nickname=eq.'+
+        encodeURIComponent(nickname);
+      const cur=await fetch(q,{headers:{
+        apikey:SB_KEY, Authorization:'Bearer '+SB_KEY }});
+      if(!cur.ok) throw new Error('lookup failed '+cur.status);
+      const rows=await cur.json();
+      if(rows.length){
+        // already registered — only update if this score is higher
+        if(score<=rows[0].score) return {updated:false,best:rows[0].score};
+        const up=await fetch(SB_URL+'/rest/v1/scores?id=eq.'+rows[0].id,{
+          method:'PATCH',
+          headers:{ apikey:SB_KEY, Authorization:'Bearer '+SB_KEY,
+            'Content-Type':'application/json', Prefer:'return=minimal' },
+          body:JSON.stringify({score:score})
+        });
+        if(!up.ok) throw new Error('update failed '+up.status);
+        return {updated:true,best:score};
+      } else {
+        // first time for this nickname — insert a new row
+        const ins=await fetch(SB_URL+'/rest/v1/scores',{
+          method:'POST',
+          headers:{ apikey:SB_KEY, Authorization:'Bearer '+SB_KEY,
+            'Content-Type':'application/json', Prefer:'return=minimal' },
+          body:JSON.stringify({nickname:nickname,score:score})
+        });
+        if(!ins.ok) throw new Error('insert failed '+ins.status);
+        return {updated:true,best:score};
+      }
+    }
+  };
 
   // ===== audio engine (Web Audio API, no files) =====
   const Audio={
@@ -519,8 +603,94 @@
     const msg = score>=best && score>0 ? '🎉 ハイスコア更新！'
       : score>=2000 ? 'お見事！コンボが冴えてる' : 'コンボを狙うともっと伸びる';
     document.getElementById('endMsg').textContent=msg;
+    // reset registration box; restore remembered nickname
+    regBox.classList.remove('done');
+    regMsg.textContent=''; regMsg.className='';
+    try{ nickInput.value=localStorage.getItem('nc_nick')||''; }catch(e){}
     document.getElementById('endScreen').style.display='flex';
   }
+
+  // ---- ranking screen control ----
+  const regBox=document.getElementById('regBox');
+  const nickInput=document.getElementById('nickInput');
+  const submitBtn=document.getElementById('submitBtn');
+  const regMsg=document.getElementById('regMsg');
+  const rankScreen=document.getElementById('rankScreen');
+  const rankList=document.getElementById('rankList');
+  const myRank=document.getElementById('myRank');
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g,m=>(
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  async function showRanking(){
+    document.getElementById('endScreen').style.display='none';
+    rankScreen.style.display='flex';
+    rankList.innerHTML='<p>読み込み中…</p>';
+    myRank.textContent='';
+    let myName=''; try{ myName=localStorage.getItem('nc_nick')||''; }catch(e){}
+    try{
+      const rows=await Rank.top();
+      if(!rows.length){
+        rankList.innerHTML='<p style="color:var(--sub)">'+
+          'まだ誰も登録していません。<br>1番乗りのチャンス！</p>';
+        return;
+      }
+      let html='', myIdx=-1;
+      rows.forEach((r,i)=>{
+        const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+        const cls=i===0?'g1':i===1?'g2':i===2?'g3':'';
+        const isMe=myName && r.nickname===myName;
+        if(isMe && myIdx<0) myIdx=i;
+        html+='<div class="rk-row '+cls+(isMe?' me':'')+'">'+
+          '<span class="rk-rank">'+medal+'</span>'+
+          '<span class="rk-name">'+escapeHtml(r.nickname)+'</span>'+
+          '<span class="rk-score">'+r.score.toLocaleString()+'</span></div>';
+      });
+      rankList.innerHTML=html;
+      if(myIdx>=0){
+        myRank.textContent='あなた（'+myName+'）は '+(myIdx+1)+'位';
+      } else if(myName){
+        myRank.textContent='あなた（'+myName+'）は20位圏外';
+      }
+    }catch(e){
+      rankList.innerHTML='<p class="err" style="color:#ff8a8a">'+
+        'ランキングを読み込めませんでした。<br>'+
+        '電波の良い場所でもう一度お試しください。</p>';
+    }
+  }
+
+  submitBtn.onclick=async()=>{
+    const name=nickInput.value.trim();
+    if(!name){ regMsg.textContent='ニックネームを入れてね';
+      regMsg.className='err'; return; }
+    regMsg.textContent='登録中…'; regMsg.className='';
+    submitBtn.disabled=true;
+    try{
+      try{ localStorage.setItem('nc_nick',name); }catch(e){}
+      const r=await Rank.submit(name,score);
+      regBox.classList.add('done');
+      regMsg.className='ok';
+      regMsg.textContent=r.updated?'登録しました！'
+        :'自己ベスト（'+r.best.toLocaleString()+'）には届かず。次こそ！';
+      setTimeout(showRanking,800);
+    }catch(e){
+      regMsg.textContent='登録できませんでした。電波を確認して再度お試しを。';
+      regMsg.className='err';
+    }
+    submitBtn.disabled=false;
+  };
+  document.getElementById('rankBtn').onclick=showRanking;
+  document.getElementById('rankBackBtn').onclick=()=>{
+    rankScreen.style.display='none';
+    document.getElementById('endScreen').style.display='flex';
+  };
+  document.getElementById('rankRetryBtn').onclick=()=>{
+    rankScreen.style.display='none';
+    Audio.resume();
+    newGame();
+  };
 
   document.getElementById('startBtn').onclick=()=>{
     Audio.init(); Audio.resume();
