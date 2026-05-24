@@ -86,7 +86,9 @@
         <p>連続する数字を指でなぞってつなげよう。<br>
            例: <b style="color:#ffce4d">3→4→5</b> のように隣りのマスへ。<br>
            3つ以上で消える。長いほど高得点！<br>
-           続けて消すと<b style="color:#ffce4d">コンボ</b>で点が倍増。</p>
+           続けて消すと<b style="color:#ffce4d">コンボ</b>で点が倍増。<br>
+           盤面を<b style="color:#ffce4d">全消し</b>で大ボーナス＋時間延長！<br>
+           つなげる手が無くなったら自動でシャッフル。</p>
         <button id="startBtn">スタート</button>
       </div>
       <div class="overlay" id="endScreen" style="display:none">
@@ -153,6 +155,7 @@
       for(let c=0;c<COLS;c++) grid[r][c]=makeCell(r,c,1+Math.floor(Math.random()*MAXV));
     }
     layout();
+    ensurePlayable();
     lastTs=performance.now();
     requestAnimationFrame(loop);
   }
@@ -268,7 +271,30 @@
       cols.add(c.col);
       setTimeout(()=>{ c.el.remove(); cells=cells.filter(x=>x!==c); },260);
     });
+
+    // all-clear bonus: board emptied
+    let remaining=0;
+    for(let r=0;r<ROWS;r++)for(let cc=0;cc<COLS;cc++) if(grid[r][cc]) remaining++;
+    if(remaining===0){
+      const bonus=2000;
+      score+=bonus;
+      elScore.textContent=score;
+      timeLeft=Math.min(totalTime,timeLeft+8); // reward: +8s
+      elCombo.textContent='ALL CLEAR! +'+bonus+'  ⏱+8s';
+      elCombo.classList.add('show');
+      flashBoard();
+    }
+
     setTimeout(()=>collapse(cols),200);
+  }
+
+  function flashBoard(){
+    const fx=document.createElement('div');
+    fx.style.cssText='position:absolute;inset:0;border-radius:16px;'+
+      'background:radial-gradient(circle,rgba(255,206,77,.9),rgba(255,206,77,0));'+
+      'z-index:15;pointer-events:none;animation:rise .9s forwards;';
+    board.appendChild(fx);
+    setTimeout(()=>fx.remove(),900);
   }
 
   function showCombo(chain){
@@ -311,6 +337,53 @@
         c.el.style.top=px(-1)+'px';
         requestAnimationFrame(()=>{ c.el.style.top=px(r)+'px'; });
       }
+    }
+    // after refill, ensure the board still has a valid move
+    setTimeout(ensurePlayable,260);
+  }
+
+  // ---- deadlock detection & auto-shuffle ----
+  function hasMove(){
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    function dfs(r,c,len,visited){
+      if(len>=3) return true;
+      for(const d of dirs){
+        const nr=r+d[0], nc=c+d[1];
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+        const nb=grid[nr][nc];
+        if(!nb) continue;
+        const key=nr*COLS+nc;
+        if(visited.has(key)) continue;
+        if(Math.abs(nb.val-grid[r][c].val)!==1) continue;
+        visited.add(key);
+        if(dfs(nr,nc,len+1,visited)) return true;
+        visited.delete(key);
+      }
+      return false;
+    }
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      if(!grid[r][c]) continue;
+      if(dfs(r,c,1,new Set([r*COLS+c]))) return true;
+    }
+    return false;
+  }
+  function ensurePlayable(){
+    if(!running) return;
+    let guard=0;
+    while(!hasMove() && guard++<60){
+      // reassign every tile a fresh random value, animate a flip
+      for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+        const cell=grid[r][c];
+        if(!cell) continue;
+        cell.val=1+Math.floor(Math.random()*MAXV);
+        cell.el.textContent=cell.val;
+        cell.el.className='cell v'+cell.val;
+      }
+    }
+    if(guard>0){
+      elCombo.textContent='シャッフル！';
+      elCombo.classList.add('show');
+      setTimeout(()=>{ if(combo<1) elCombo.classList.remove('show'); },1200);
     }
   }
 
