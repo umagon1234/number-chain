@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>数つなぎ — Number Chain</title>
+<style>
+  :root{
+    --bg:#10131c; --panel:#1b2030; --tile:#2a3142; --accent:#ffce4d;
+    --ink:#f4f6fb; --sub:#8b93a8;
+    --c1:#5ec8f5; --c2:#7ee08a; --c3:#ffce4d; --c4:#ff9b6a; --c5:#e873c4;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    background:radial-gradient(circle at 50% 0%,#1c2236,#0c0e16);
+    color:var(--ink);font-family:-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    min-height:100%;overflow:hidden;user-select:none;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  #app{width:100%;max-width:440px;display:flex;flex-direction:column;
+    height:100vh;height:100dvh;padding:10px 14px;}
+  header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;}
+  h1{font-size:20px;letter-spacing:.04em;font-weight:800;}
+  h1 small{color:var(--accent);font-size:12px;display:block;letter-spacing:.2em;font-weight:600;}
+  .stats{display:flex;gap:8px;}
+  .stat{background:var(--panel);border-radius:12px;padding:6px 12px;text-align:center;min-width:74px;}
+  .stat .label{font-size:10px;color:var(--sub);letter-spacing:.1em;}
+  .stat .val{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;}
+  #timebar{height:7px;background:var(--panel);border-radius:4px;overflow:hidden;margin:6px 0 4px;}
+  #timefill{height:100%;width:100%;background:linear-gradient(90deg,#7ee08a,#ffce4d,#ff6a6a);
+    transition:width .1s linear;}
+  #combo{height:22px;text-align:center;font-weight:800;font-size:15px;
+    color:var(--accent);opacity:0;transition:opacity .2s;}
+  #combo.show{opacity:1;}
+  #boardWrap{flex:1;display:flex;align-items:center;justify-content:center;}
+  #board{position:relative;touch-action:none;background:var(--panel);
+    border-radius:16px;padding:6px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+  .cell{position:absolute;display:flex;align-items:center;justify-content:center;
+    font-size:24px;font-weight:800;border-radius:12px;color:#10131c;
+    transition:transform .14s cubic-bezier(.3,1.4,.5,1),top .18s ease,opacity .15s;
+    will-change:transform,top;}
+  .cell.v1{background:var(--c1);} .cell.v2{background:var(--c2);}
+  .cell.v3{background:var(--c3);} .cell.v4{background:var(--c4);}
+  .cell.v5{background:var(--c5);}
+  .cell.sel{transform:scale(1.14);box-shadow:0 0 0 3px #fff,0 0 16px rgba(255,255,255,.6);z-index:5;}
+  .cell.pop{animation:pop .26s forwards;}
+  @keyframes pop{60%{transform:scale(1.3);opacity:1;}100%{transform:scale(0);opacity:0;}}
+  svg#link{position:absolute;left:0;top:0;pointer-events:none;z-index:4;overflow:visible;}
+  #hint{text-align:center;font-size:12px;color:var(--sub);margin-top:8px;height:16px;}
+  .float{position:absolute;font-weight:800;font-size:22px;color:#fff;
+    pointer-events:none;z-index:9;text-shadow:0 2px 6px rgba(0,0,0,.6);
+    animation:rise 1s forwards;}
+  @keyframes rise{0%{transform:translateY(0);opacity:0;}
+    15%{opacity:1;}100%{transform:translateY(-60px);opacity:0;}}
+  .overlay{position:absolute;inset:0;background:rgba(8,10,16,.92);
+    border-radius:16px;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:14px;z-index:20;text-align:center;padding:24px;}
+  .overlay h2{font-size:30px;}
+  .overlay p{color:var(--sub);font-size:14px;line-height:1.7;}
+  .big{font-size:46px;font-weight:800;color:var(--accent);}
+  button{background:var(--accent);color:#10131c;border:none;font-weight:800;
+    font-size:17px;padding:13px 34px;border-radius:30px;cursor:pointer;
+    box-shadow:0 6px 18px rgba(255,206,77,.35);}
+  button:active{transform:translateY(2px);}
+  .ghost{background:none;color:var(--sub);box-shadow:none;font-size:13px;padding:6px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>数つなぎ<small>NUMBER CHAIN</small></h1>
+    <div class="stats">
+      <div class="stat"><div class="label">SCORE</div><div class="val" id="score">0</div></div>
+      <div class="stat"><div class="label">BEST</div><div class="val" id="best">0</div></div>
+    </div>
+  </header>
+  <div id="timebar"><div id="timefill"></div></div>
+  <div id="combo"></div>
+  <div id="boardWrap">
+    <div id="board">
+      <svg id="link"></svg>
+      <div class="overlay" id="startScreen">
+        <h2>数つなぎ</h2>
+        <p>連続する数字を指でなぞってつなげよう。<br>
+           例: <b style="color:#ffce4d">3→4→5</b> のように隣りのマスへ。<br>
+           3つ以上で消える。長いほど高得点！<br>
+           続けて消すと<b style="color:#ffce4d">コンボ</b>で点が倍増。</p>
+        <button id="startBtn">スタート</button>
+      </div>
+      <div class="overlay" id="endScreen" style="display:none">
+        <h2>タイムアップ</h2>
+        <div class="big" id="finalScore">0</div>
+        <p id="endMsg"></p>
+        <button id="retryBtn">もう一度</button>
+      </div>
+    </div>
+  </div>
+  <div id="hint">指でなぞって連続する数字をつなごう</div>
+</div>
+<script>
+(function(){
+  "use strict";
+  const COLS=6, ROWS=7, MAXV=5;
+  const board=document.getElementById('board');
+  const svg=document.getElementById('link');
+  const elScore=document.getElementById('score');
+  const elBest=document.getElementById('best');
+  const elTimefill=document.getElementById('timefill');
+  const elCombo=document.getElementById('combo');
+  const elHint=document.getElementById('hint');
+
+  let GAP=6, SIZE=0, cells=[], grid=[], path=[], dragging=false;
+  let score=0, best=0, combo=0, comboTimer=0, running=false;
+  let timeLeft=0, totalTime=75, lastTs=0;
+
+  try{ best=parseInt(localStorage.getItem('nc_best')||'0',10)||0; }catch(e){}
+  elBest.textContent=best;
+
+  function layout(){
+    const wrap=document.getElementById('boardWrap');
+    const availW=Math.min(wrap.clientWidth, 412);
+    const availH=wrap.clientHeight;
+    let s=Math.floor((availW-GAP*(COLS+1))/COLS);
+    const sByH=Math.floor((availH-GAP*(ROWS+1))/ROWS);
+    s=Math.min(s,sByH);
+    SIZE=s;
+    board.style.width=(COLS*SIZE+GAP*(COLS+1))+'px';
+    board.style.height=(ROWS*SIZE+GAP*(ROWS+1))+'px';
+    svg.setAttribute('width',board.style.width);
+    svg.setAttribute('height',board.style.height);
+    for(const c of cells) placeCell(c);
+  }
+  const px=i=>GAP+i*(SIZE+GAP);
+  const center=(r,c)=>({x:px(c)+SIZE/2, y:px(r)+SIZE/2});
+
+  function placeCell(c){
+    c.el.style.width=SIZE+'px';
+    c.el.style.height=SIZE+'px';
+    c.el.style.left=px(c.col)+'px';
+    c.el.style.top=px(c.row)+'px';
+    c.el.style.fontSize=Math.round(SIZE*0.42)+'px';
+  }
+
+  function newGame(){
+    cells.forEach(c=>c.el.remove());
+    cells=[]; grid=[]; path=[]; score=0; combo=0; comboTimer=0;
+    timeLeft=totalTime; running=true;
+    elScore.textContent='0';
+    for(let r=0;r<ROWS;r++){
+      grid[r]=[];
+      for(let c=0;c<COLS;c++) grid[r][c]=makeCell(r,c,1+Math.floor(Math.random()*MAXV));
+    }
+    layout();
+    lastTs=performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function makeCell(row,col,val){
+    const el=document.createElement('div');
+    el.className='cell v'+val;
+    el.textContent=val;
+    board.appendChild(el);
+    const c={el,row,col,val};
+    placeCell(c);
+    cells.push(c);
+    return c;
+  }
+
+  // ---- input ----
+  function cellFromPoint(x,y){
+    const rect=board.getBoundingClientRect();
+    const lx=x-rect.left, ly=y-rect.top;
+    const col=Math.floor((lx-GAP/2)/(SIZE+GAP));
+    const row=Math.floor((ly-GAP/2)/(SIZE+GAP));
+    if(row<0||row>=ROWS||col<0||col>=COLS) return null;
+    const c=grid[row][col];
+    if(!c) return null;
+    const ctr=center(row,col);
+    if(Math.hypot(lx-ctr.x,ly-ctr.y) > SIZE*0.62) return null;
+    return c;
+  }
+  function adjacent(a,b){
+    return Math.abs(a.row-b.row)+Math.abs(a.col-b.col)===1;
+  }
+  function tryAdd(c){
+    if(!c||!running) return;
+    if(path.length && path[path.length-1]===c) return;
+    // backtrack
+    if(path.length>=2 && path[path.length-2]===c){
+      path.pop().el.classList.remove('sel');
+      drawPath(); return;
+    }
+    if(path.includes(c)) return;
+    if(path.length){
+      const last=path[path.length-1];
+      if(!adjacent(last,c)) return;
+      if(Math.abs(c.val-last.val)!==1) return; // must be ±1 consecutive
+    }
+    path.push(c); c.el.classList.add('sel');
+    drawPath();
+  }
+  function drawPath(){
+    if(path.length<2){ svg.innerHTML=''; return; }
+    let d='';
+    path.forEach((c,i)=>{
+      const p=center(c.row,c.col);
+      d+=(i?'L':'M')+p.x+' '+p.y+' ';
+    });
+    const ok=path.length>=3;
+    svg.innerHTML='<path d="'+d+'" fill="none" stroke="'+
+      (ok?'#fff':'rgba(255,255,255,.45)')+'" stroke-width="'+
+      Math.max(5,SIZE*0.16)+'" stroke-linecap="round" stroke-linejoin="round"/>';
+  }
+
+  function pointer(e){
+    const t=e.touches?e.touches[0]:e;
+    return {x:t.clientX,y:t.clientY};
+  }
+  function onStart(e){
+    if(!running) return;
+    e.preventDefault();
+    dragging=true;
+    const p=pointer(e);
+    tryAdd(cellFromPoint(p.x,p.y));
+  }
+  function onMove(e){
+    if(!dragging) return;
+    e.preventDefault();
+    const p=pointer(e);
+    tryAdd(cellFromPoint(p.x,p.y));
+  }
+  function onEnd(e){
+    if(!dragging) return;
+    dragging=false;
+    resolve();
+  }
+  board.addEventListener('touchstart',onStart,{passive:false});
+  board.addEventListener('touchmove',onMove,{passive:false});
+  board.addEventListener('touchend',onEnd);
+  board.addEventListener('mousedown',onStart);
+  window.addEventListener('mousemove',onMove);
+  window.addEventListener('mouseup',onEnd);
+
+  // ---- resolve a chain ----
+  function resolve(){
+    const chain=path.slice();
+    path.forEach(c=>c.el.classList.remove('sel'));
+    path=[]; svg.innerHTML='';
+    if(chain.length<3){ return; }
+
+    // score: base grows with length, multiplied by combo
+    combo++; comboTimer=2.4;
+    const lenBonus=chain.length*(chain.length+1)/2; // 3->6,4->10,5->15...
+    const mult=1+(combo-1)*0.5;
+    const gained=Math.round(lenBonus*10*mult);
+    score+=gained;
+    elScore.textContent=score;
+    showCombo(chain);
+    floatText(chain[chain.length-1], '+'+gained);
+
+    // remove
+    const cols=new Set();
+    chain.forEach(c=>{
+      c.el.classList.add('pop');
+      grid[c.row][c.col]=null;
+      cols.add(c.col);
+      setTimeout(()=>{ c.el.remove(); cells=cells.filter(x=>x!==c); },260);
+    });
+    setTimeout(()=>collapse(cols),200);
+  }
+
+  function showCombo(chain){
+    if(combo>=2){
+      elCombo.textContent=combo+' COMBO!  ×'+(1+(combo-1)*0.5).toFixed(1);
+      elCombo.classList.add('show');
+    } else {
+      elCombo.textContent=chain.length+'つなぎ！';
+      elCombo.classList.add('show');
+    }
+  }
+  function floatText(c,txt){
+    const f=document.createElement('div');
+    f.className='float'; f.textContent=txt;
+    f.style.left=(px(c.col))+'px';
+    f.style.top=(px(c.row))+'px';
+    f.style.width=SIZE+'px'; f.style.textAlign='center';
+    board.appendChild(f);
+    setTimeout(()=>f.remove(),1000);
+  }
+
+  function collapse(cols){
+    // gravity per column
+    for(const col of cols){
+      let write=ROWS-1;
+      for(let r=ROWS-1;r>=0;r--){
+        if(grid[r][col]){
+          const c=grid[r][col];
+          grid[r][col]=null;
+          grid[write][col]=c;
+          c.row=write; placeCell(c);
+          write--;
+        }
+      }
+      // refill — harder over time: bias toward varied values
+      for(let r=write;r>=0;r--){
+        const v=1+Math.floor(Math.random()*MAXV);
+        const c=makeCell(-1,col,v);
+        c.row=r; grid[r][col]=c;
+        c.el.style.top=px(-1)+'px';
+        requestAnimationFrame(()=>{ c.el.style.top=px(r)+'px'; });
+      }
+    }
+  }
+
+  // ---- game loop ----
+  function loop(ts){
+    if(!running) return;
+    const dt=(ts-lastTs)/1000; lastTs=ts;
+    timeLeft-=dt;
+    if(comboTimer>0){
+      comboTimer-=dt;
+      if(comboTimer<=0){ combo=0; elCombo.classList.remove('show'); }
+    }
+    elTimefill.style.width=Math.max(0,timeLeft/totalTime*100)+'%';
+    if(timeLeft<=0){ endGame(); return; }
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(){
+    running=false;
+    elTimefill.style.width='0%';
+    if(score>best){
+      best=score; elBest.textContent=best;
+      try{ localStorage.setItem('nc_best',String(best)); }catch(e){}
+    }
+    document.getElementById('finalScore').textContent=score;
+    const msg = score>=best && score>0 ? '🎉 ハイスコア更新！'
+      : score>=2000 ? 'お見事！コンボが冴えてる' : 'コンボを狙うともっと伸びる';
+    document.getElementById('endMsg').textContent=msg;
+    document.getElementById('endScreen').style.display='flex';
+  }
+
+  document.getElementById('startBtn').onclick=()=>{
+    document.getElementById('startScreen').style.display='none';
+    newGame();
+  };
+  document.getElementById('retryBtn').onclick=()=>{
+    document.getElementById('endScreen').style.display='none';
+    newGame();
+  };
+  window.addEventListener('resize',()=>{ if(SIZE) layout(); });
+  // initial sizing so board has dimensions behind overlay
+  setTimeout(()=>{
+    board.style.width='372px'; board.style.height='434px';
+    svg.setAttribute('width','372'); svg.setAttribute('height','434');
+    const wrap=document.getElementById('boardWrap');
+    const availW=Math.min(wrap.clientWidth,412);
+    let s=Math.floor((availW-GAP*(COLS+1))/COLS);
+    const sByH=Math.floor((wrap.clientHeight-GAP*(ROWS+1))/ROWS);
+    SIZE=Math.min(s,sByH);
+    board.style.width=(COLS*SIZE+GAP*(COLS+1))+'px';
+    board.style.height=(ROWS*SIZE+GAP*(ROWS+1))+'px';
+  },30);
+})();
+</script>
+</body>
+</html>
