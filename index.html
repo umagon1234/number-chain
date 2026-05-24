@@ -149,7 +149,7 @@
            3つ以上で消える。長いほど高得点！<br>
            続けて消すと<b style="color:#ffce4d">コンボ</b>で点が倍増。<br>
            <b style="color:#ffce4d">5つ以上</b>つなぐと<b style="color:#ffce4d">時間が延長</b>！<br>
-           盤面を<b style="color:#ffce4d">全消し</b>で大ボーナス＋10秒。<br>
+           手が無くなり<b style="color:#ffce4d">シャッフル</b>で大ボーナス＋10秒。<br>
            手が止まると消せる列を<b style="color:#ffce4d">ヒント</b>表示。</p>
         <button id="startBtn">スタート</button>
       </div>
@@ -506,19 +506,6 @@
       setTimeout(()=>{ c.el.remove(); cells=cells.filter(x=>x!==c); },260);
     });
 
-    // all-clear bonus: board emptied — flat 2000pt, +10s
-    let remaining=0;
-    for(let r=0;r<ROWS;r++)for(let cc=0;cc<COLS;cc++) if(grid[r][cc]) remaining++;
-    if(remaining===0){
-      const bonus=2000;
-      score+=bonus;
-      elScore.textContent=score;
-      timeLeft=Math.min(totalTime,timeLeft+10); // reward: +10s
-      elCombo.classList.remove('show');
-      Audio.fanfare();
-      allClearFx(bonus);
-    }
-
     setTimeout(()=>collapse(cols),200);
   }
 
@@ -531,8 +518,8 @@
     setTimeout(()=>fx.remove(),900);
   }
 
-  // flashy all-clear celebration: flash + shake + banner + confetti
-  function allClearFx(bonus){
+  // flashy celebration: flash + shake + banner + confetti
+  function bonusFx(bigText,subText){
     flashBoard();
     // board shake
     board.classList.remove('ac-shake');
@@ -541,8 +528,8 @@
     // big banner
     const banner=document.createElement('div');
     banner.className='ac-banner';
-    banner.innerHTML='<div class="big-txt">ALL CLEAR!</div>'+
-      '<div class="sub-txt">+'+bonus.toLocaleString()+'点  ⏱+10s</div>';
+    banner.innerHTML='<div class="big-txt">'+bigText+'</div>'+
+      '<div class="sub-txt">'+subText+'</div>';
     board.appendChild(banner);
     setTimeout(()=>banner.remove(),1800);
     // confetti burst
@@ -603,7 +590,8 @@
       }
     }
     // after refill, ensure the board still has a valid move
-    setTimeout(ensurePlayable,260);
+    // (bonus awarded if a deadlock is found & shuffled during play)
+    setTimeout(()=>ensurePlayable(true),260);
   }
 
   // ---- deadlock detection & auto-shuffle ----
@@ -667,7 +655,7 @@
     hintCells=chain;
     chain.forEach(c=>c.el.classList.add('hint'));
   }
-  function ensurePlayable(){
+  function ensurePlayable(awardBonus){
     if(!running) return;
     let guard=0;
     while(!hasMove() && guard++<60){
@@ -681,10 +669,22 @@
       }
     }
     if(guard>0){
-      elCombo.textContent='シャッフル！';
-      elCombo.classList.add('show');
       Audio.shuffle();
-      setTimeout(()=>{ if(combo<1) elCombo.classList.remove('show'); },1200);
+      if(awardBonus){
+        // deadlock during play, cleared by shuffle — award a bonus
+        const bonus=2000;
+        score+=bonus;
+        elScore.textContent=score;
+        timeLeft=Math.min(totalTime,timeLeft+10); // +10s
+        elCombo.classList.remove('show');
+        Audio.fanfare();
+        bonusFx('SHUFFLE!','詰み回避ボーナス +'+bonus.toLocaleString()+'点  ⏱+10s');
+      } else {
+        // start-of-game shuffle — no bonus
+        elCombo.textContent='シャッフル！';
+        elCombo.classList.add('show');
+        setTimeout(()=>{ if(combo<1) elCombo.classList.remove('show'); },1200);
+      }
     }
   }
 
