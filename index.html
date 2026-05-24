@@ -46,6 +46,11 @@
   .cell.v5{background:var(--c5);}
   .cell.sel{transform:scale(1.14);box-shadow:0 0 0 3px #fff,0 0 16px rgba(255,255,255,.6);z-index:5;}
   .cell.pop{animation:pop .26s forwards;}
+  .cell.hint{animation:hintPulse 1s ease-in-out infinite;z-index:3;}
+  @keyframes hintPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,0);}
+    50%{box-shadow:0 0 0 3px rgba(255,255,255,.85),0 0 18px rgba(255,255,255,.7);}
+  }
   @keyframes pop{60%{transform:scale(1.3);opacity:1;}100%{transform:scale(0);opacity:0;}}
   svg#link{position:absolute;left:0;top:0;pointer-events:none;z-index:4;overflow:visible;}
   #hint{text-align:center;font-size:12px;color:var(--sub);margin-top:8px;height:16px;}
@@ -54,6 +59,34 @@
     animation:rise 1s forwards;}
   @keyframes rise{0%{transform:translateY(0);opacity:0;}
     15%{opacity:1;}100%{transform:translateY(-60px);opacity:0;}}
+  /* all-clear flashy effects */
+  .ac-banner{position:absolute;left:0;right:0;top:38%;text-align:center;
+    z-index:30;pointer-events:none;animation:acBanner 1.8s forwards;}
+  .ac-banner .big-txt{font-size:38px;font-weight:900;letter-spacing:.06em;
+    color:#fff;text-shadow:0 0 14px #ffce4d,0 0 28px #ff9b6a,0 3px 8px rgba(0,0,0,.7);}
+  .ac-banner .sub-txt{font-size:20px;font-weight:800;color:#ffce4d;
+    margin-top:6px;text-shadow:0 2px 6px rgba(0,0,0,.7);}
+  @keyframes acBanner{
+    0%{transform:scale(.3);opacity:0;}
+    18%{transform:scale(1.18);opacity:1;}
+    30%{transform:scale(1);}
+    78%{transform:scale(1);opacity:1;}
+    100%{transform:scale(1.05);opacity:0;}
+  }
+  .confetti{position:absolute;width:10px;height:14px;z-index:28;
+    pointer-events:none;border-radius:2px;animation:confFall 1.7s linear forwards;}
+  @keyframes confFall{
+    0%{transform:translateY(-20px) rotate(0);opacity:1;}
+    100%{transform:translateY(520px) rotate(720deg);opacity:0;}
+  }
+  @keyframes acShake{
+    0%,100%{transform:translate(0,0);}
+    20%{transform:translate(-6px,3px);}
+    40%{transform:translate(6px,-3px);}
+    60%{transform:translate(-4px,-3px);}
+    80%{transform:translate(4px,3px);}
+  }
+  #board.ac-shake{animation:acShake .5s ease-in-out;}
   .overlay{position:absolute;inset:0;background:rgba(8,10,16,.92);
     border-radius:16px;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:14px;z-index:20;text-align:center;padding:24px;}
@@ -115,8 +148,9 @@
            例: <b style="color:#ffce4d">3→4→5</b> のように隣りのマスへ。<br>
            3つ以上で消える。長いほど高得点！<br>
            続けて消すと<b style="color:#ffce4d">コンボ</b>で点が倍増。<br>
-           盤面を<b style="color:#ffce4d">全消し</b>で大ボーナス＋時間延長！<br>
-           つなげる手が無くなったら自動でシャッフル。</p>
+           <b style="color:#ffce4d">5つ以上</b>つなぐと<b style="color:#ffce4d">時間が延長</b>！<br>
+           盤面を<b style="color:#ffce4d">全消し</b>で大ボーナス＋10秒。<br>
+           手が止まると消せる列を<b style="color:#ffce4d">ヒント</b>表示。</p>
         <button id="startBtn">スタート</button>
       </div>
       <div class="overlay" id="endScreen" style="display:none">
@@ -299,7 +333,8 @@
 
   let GAP=6, SIZE=0, cells=[], grid=[], path=[], dragging=false;
   let score=0, best=0, combo=0, comboTimer=0, running=false;
-  let timeLeft=0, totalTime=75, lastTs=0;
+  let timeLeft=0, totalTime=60, lastTs=0;
+  let idleTimer=0, hintCells=[]; // hint: highlight a clearable line after idle
 
   try{ best=parseInt(localStorage.getItem('nc_best')||'0',10)||0; }catch(e){}
   elBest.textContent=best;
@@ -333,6 +368,7 @@
     cells.forEach(c=>c.el.remove());
     cells=[]; grid=[]; path=[]; score=0; combo=0; comboTimer=0;
     timeLeft=totalTime; running=true;
+    idleTimer=0; hintCells=[];
     elScore.textContent='0';
     for(let r=0;r<ROWS;r++){
       grid[r]=[];
@@ -411,6 +447,7 @@
     if(!running) return;
     e.preventDefault();
     dragging=true;
+    idleTimer=0; clearHint(); // any touch resets the idle hint
     const p=pointer(e);
     tryAdd(cellFromPoint(p.x,p.y));
   }
@@ -437,10 +474,11 @@
     const chain=path.slice();
     path.forEach(c=>c.el.classList.remove('sel'));
     path=[]; svg.innerHTML='';
+    idleTimer=0; clearHint(); // board is about to change
     if(chain.length<3){ return; }
 
     // score: base grows with length, multiplied by combo
-    combo++; comboTimer=2.4;
+    combo++; comboTimer=3.5;
     const lenBonus=chain.length*(chain.length+1)/2; // 3->6,4->10,5->15...
     const mult=1+(combo-1)*0.5;
     const gained=Math.round(lenBonus*10*mult);
@@ -449,6 +487,15 @@
     showCombo(chain);
     Audio.clear(combo,chain.length);
     floatText(chain[chain.length-1], '+'+gained);
+
+    // long-chain time bonus: 5 tiles -> +2s, 6 -> +3s, 7 -> +4s ...
+    if(chain.length>=5){
+      const tBonus=chain.length-3;
+      timeLeft=Math.min(totalTime,timeLeft+tBonus);
+      elCombo.textContent=chain.length+'つなぎ！  ⏱+'+tBonus+'s';
+      elCombo.classList.add('show');
+      floatText(chain[0], '⏱+'+tBonus+'s');
+    }
 
     // remove
     const cols=new Set();
@@ -459,18 +506,17 @@
       setTimeout(()=>{ c.el.remove(); cells=cells.filter(x=>x!==c); },260);
     });
 
-    // all-clear bonus: board emptied
+    // all-clear bonus: board emptied — flat 2000pt, +10s
     let remaining=0;
     for(let r=0;r<ROWS;r++)for(let cc=0;cc<COLS;cc++) if(grid[r][cc]) remaining++;
     if(remaining===0){
       const bonus=2000;
       score+=bonus;
       elScore.textContent=score;
-      timeLeft=Math.min(totalTime,timeLeft+8); // reward: +8s
-      elCombo.textContent='ALL CLEAR! +'+bonus+'  ⏱+8s';
-      elCombo.classList.add('show');
+      timeLeft=Math.min(totalTime,timeLeft+10); // reward: +10s
+      elCombo.classList.remove('show');
       Audio.fanfare();
-      flashBoard();
+      allClearFx(bonus);
     }
 
     setTimeout(()=>collapse(cols),200);
@@ -483,6 +529,36 @@
       'z-index:15;pointer-events:none;animation:rise .9s forwards;';
     board.appendChild(fx);
     setTimeout(()=>fx.remove(),900);
+  }
+
+  // flashy all-clear celebration: flash + shake + banner + confetti
+  function allClearFx(bonus){
+    flashBoard();
+    // board shake
+    board.classList.remove('ac-shake');
+    void board.offsetWidth; // reflow to restart animation
+    board.classList.add('ac-shake');
+    // big banner
+    const banner=document.createElement('div');
+    banner.className='ac-banner';
+    banner.innerHTML='<div class="big-txt">ALL CLEAR!</div>'+
+      '<div class="sub-txt">+'+bonus.toLocaleString()+'点  ⏱+10s</div>';
+    board.appendChild(banner);
+    setTimeout(()=>banner.remove(),1800);
+    // confetti burst
+    const colors=['#5ec8f5','#7ee08a','#ffce4d','#ff9b6a','#e873c4','#fff'];
+    const w=board.clientWidth;
+    for(let i=0;i<46;i++){
+      const conf=document.createElement('div');
+      conf.className='confetti';
+      conf.style.background=colors[i%colors.length];
+      conf.style.left=Math.random()*w+'px';
+      conf.style.top='-10px';
+      conf.style.animationDelay=(Math.random()*0.35)+'s';
+      conf.style.transform='rotate('+(Math.random()*360)+'deg)';
+      board.appendChild(conf);
+      setTimeout(()=>conf.remove(),2100);
+    }
   }
 
   function showCombo(chain){
@@ -555,6 +631,42 @@
     }
     return false;
   }
+  // find one clearable chain (length 3+) — used for the idle hint
+  function findChain(){
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    let found=null;
+    function dfs(r,c,trail){
+      if(found) return;
+      if(trail.length>=3){ found=trail.slice(); return; }
+      for(const d of dirs){
+        const nr=r+d[0], nc=c+d[1];
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+        const nb=grid[nr][nc];
+        if(!nb||trail.includes(nb)) continue;
+        if(Math.abs(nb.val-grid[r][c].val)!==1) continue;
+        trail.push(nb);
+        dfs(nr,nc,trail);
+        if(found) return;
+        trail.pop();
+      }
+    }
+    for(let r=0;r<ROWS&&!found;r++)for(let c=0;c<COLS&&!found;c++){
+      if(!grid[r][c]) continue;
+      dfs(r,c,[grid[r][c]]);
+    }
+    return found;
+  }
+  function clearHint(){
+    hintCells.forEach(c=>c&&c.el&&c.el.classList.remove('hint'));
+    hintCells=[];
+  }
+  function showHint(){
+    clearHint();
+    const chain=findChain();
+    if(!chain) return;
+    hintCells=chain;
+    chain.forEach(c=>c.el.classList.add('hint'));
+  }
   function ensurePlayable(){
     if(!running) return;
     let guard=0;
@@ -584,6 +696,11 @@
     if(comboTimer>0){
       comboTimer-=dt;
       if(comboTimer<=0){ combo=0; elCombo.classList.remove('show'); }
+    }
+    // idle hint: after 5s without action, highlight a clearable line
+    idleTimer+=dt;
+    if(idleTimer>=5 && hintCells.length===0 && !dragging){
+      showHint();
     }
     elTimefill.style.width=Math.max(0,timeLeft/totalTime*100)+'%';
     if(timeLeft<=0){ endGame(); return; }
