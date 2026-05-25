@@ -98,10 +98,16 @@
     box-shadow:0 6px 18px rgba(255,206,77,.35);}
   button:active{transform:translateY(2px);}
   .ghost{background:none;color:var(--sub);box-shadow:none;font-size:13px;padding:6px;}
-  #soundBtn{background:var(--panel);box-shadow:none;border-radius:12px;
-    font-size:20px;padding:0;width:40px;height:40px;line-height:1;
-    display:flex;align-items:center;justify-content:center;align-self:stretch;}
-  #soundBtn.off{opacity:.45;}
+  /* v: ゲージ下の操作バー。HOMEは左、サウンドは右に振り分け、互いを離す。 */
+  #ctrlBar{display:flex;justify-content:space-between;align-items:center;
+    margin:2px 0 2px;}
+  .ctrl-btn{background:var(--panel);color:var(--sub);box-shadow:none;
+    border-radius:10px;font-size:12px;font-weight:700;
+    padding:7px 12px;min-height:34px;line-height:1;
+    display:flex;align-items:center;gap:4px;}
+  .ctrl-btn:active{transform:translateY(1px);}
+  /* サウンドOFF時は赤系で「切れている」と分かるように */
+  #soundBtn.off{color:#ff8a8a;opacity:.85;}
   /* ranking ui */
   #regBox{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px;}
   #nickInput{background:var(--tile);border:2px solid #3a4256;
@@ -134,10 +140,14 @@
     <div class="stats">
       <div class="stat"><div class="label">SCORE</div><div class="val" id="score">0</div></div>
       <div class="stat"><div class="label">BEST</div><div class="val" id="best">0</div></div>
-      <button id="soundBtn" aria-label="音のオンオフ">🔊</button>
     </div>
   </header>
   <div id="timebar"><div id="timefill"></div></div>
+  <!-- v: 操作バー（ゲージ下）。左=HOME / 右=サウンドトグル。-->
+  <div id="ctrlBar">
+    <button id="homeBtn" class="ctrl-btn" aria-label="タイトルに戻る">◀ HOME</button>
+    <button id="soundBtn" class="ctrl-btn" aria-label="サウンドの切り替え">🔊 サウンド ON</button>
+  </div>
   <div id="combo"></div>
   <div id="boardWrap">
     <div id="board">
@@ -152,6 +162,7 @@
            手が無くなり<b style="color:#ffce4d">シャッフル</b>で大ボーナス＋10秒。<br>
            手が止まると消せる列を<b style="color:#ffce4d">ヒント</b>表示。</p>
         <button id="startBtn">スタート</button>
+        <button id="rankFromHomeBtn" class="ghost">🏆 ランキングを見る</button>
       </div>
       <div class="overlay" id="endScreen" style="display:none">
         <h2>タイムアップ</h2>
@@ -735,6 +746,9 @@
   const rankScreen=document.getElementById('rankScreen');
   const rankList=document.getElementById('rankList');
   const myRank=document.getElementById('myRank');
+  // v: ランキング画面をどこから開いたか。'end'=結果画面 / 'home'=タイトル画面。
+  //   「戻る」ボタンの行き先と文言をこれで出し分ける。
+  let rankBackFrom='end';
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g,m=>(
@@ -742,7 +756,12 @@
   }
 
   async function showRanking(){
+    // v: 元画面（結果 or タイトル）を両方閉じてからランキングを出す
     document.getElementById('endScreen').style.display='none';
+    document.getElementById('startScreen').style.display='none';
+    // 戻るボタンの文言を遷移元に合わせる
+    document.getElementById('rankBackBtn').textContent=
+      rankBackFrom==='home' ? 'タイトルに戻る' : '結果画面に戻る';
     rankScreen.style.display='flex';
     rankList.innerHTML='<p>読み込み中…</p>';
     myRank.textContent='';
@@ -798,14 +817,27 @@
     }
     submitBtn.disabled=false;
   };
-  document.getElementById('rankBtn').onclick=showRanking;
+  // 結果画面から「ランキングを見る」
+  document.getElementById('rankBtn').onclick=()=>{
+    rankBackFrom='end';
+    showRanking();
+  };
+  // v: タイトル画面から「🏆 ランキングを見る」（残り1か所の配線）
+  document.getElementById('rankFromHomeBtn').onclick=()=>{
+    rankBackFrom='home';
+    showRanking();
+  };
+  // 「戻る」= 遷移元の画面へ。タイトルから来たならタイトル、結果から来たなら結果。
   document.getElementById('rankBackBtn').onclick=()=>{
     rankScreen.style.display='none';
-    document.getElementById('endScreen').style.display='flex';
+    document.getElementById(
+      rankBackFrom==='home' ? 'startScreen' : 'endScreen'
+    ).style.display='flex';
   };
   document.getElementById('rankRetryBtn').onclick=()=>{
     rankScreen.style.display='none';
-    Audio.resume();
+    // v: タイトル→ランキング→もう一度 の経路ではまだ Audio.init 未実行のことがある
+    Audio.init(); Audio.resume();
     newGame();
   };
 
@@ -819,10 +851,20 @@
     document.getElementById('endScreen').style.display='none';
     newGame();
   };
-  // sound on/off button
+  // v: ゲーム中の「HOME」= タイトル画面へ戻る。確認なし、進行中スコアは破棄。
+  //   running=false でループとタイマーが止まる（endGame と同じ要領）。
+  document.getElementById('homeBtn').onclick=()=>{
+    running=false;
+    Audio.stopBGM();
+    document.getElementById('endScreen').style.display='none';
+    document.getElementById('rankScreen').style.display='none';
+    document.getElementById('startScreen').style.display='flex';
+  };
+
+  // sound on/off button（v: マーク＋ON/OFF文字のトグル表示）
   const soundBtn=document.getElementById('soundBtn');
   function syncSoundBtn(){
-    soundBtn.textContent=Audio.on?'🔊':'🔇';
+    soundBtn.textContent=Audio.on?'🔊 サウンド ON':'🔇 サウンド OFF';
     soundBtn.classList.toggle('off',!Audio.on);
   }
   syncSoundBtn();
